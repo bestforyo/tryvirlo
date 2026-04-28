@@ -80,7 +80,7 @@ export async function cleanupAssets(): Promise<CleanupResult> {
         });
 
         result.deletedAssets++;
-        result.freedSpace += asset.fileSize || 0;
+        result.freedSpace += Number(asset.fileSize || 0);
       } catch (error: any) {
         result.errors.push(`Asset ${asset.id}: ${error.message}`);
       }

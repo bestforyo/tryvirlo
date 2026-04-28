@@ -19,11 +19,11 @@ export default async function DashboardPage() {
   const demoData = {
     creditsBalance: 1250,
     plan: 'PRO',
-    subscription: {
+    subscriptions: [{
       plan: 'PRO',
       status: 'ACTIVE',
       currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-    },
+    }],
     recentGenerations: [
       {
         id: '1',
@@ -63,7 +63,7 @@ export default async function DashboardPage() {
       select: {
         creditsBalance: true,
         plan: true,
-        subscription: {
+        subscriptions: {
           select: {
             plan: true,
             status: true,
@@ -111,7 +111,8 @@ export default async function DashboardPage() {
   }
 
   // Get plan details
-  const plan = userData?.subscription?.plan || userData?.plan || 'FREE'
+  const subscription = userData?.subscriptions?.[0]
+  const plan = subscription?.plan || userData?.plan || 'FREE'
   const creditsBalance = userData?.creditsBalance || 0
   const maxCredits = plan === 'FREE' ? 100 : plan === 'LITE' ? 500 : plan === 'PRO' ? 2000 : 10000
 
@@ -130,7 +131,7 @@ export default async function DashboardPage() {
         {/* Welcome Header */}
         <div>
           <h1 className="text-4xl font-bold text-white mb-2">
-            Welcome back, {user.name || 'User'}
+            Welcome back, {(user as any).name || 'User'}
           </h1>
           <p className="text-[#9CA3AF]">Manage your creations and credits</p>
         </div>
@@ -148,8 +149,8 @@ export default async function DashboardPage() {
             icon="⭐"
             label="Plan"
             value={plan.charAt(0) + plan.slice(1).toLowerCase()}
-            subtext={userData?.subscription?.currentPeriodEnd
-              ? `Renews ${new Date(userData.subscription.currentPeriodEnd).toLocaleDateString()}`
+            subtext={subscription?.currentPeriodEnd
+              ? `Renews ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`
               : 'Free plan'}
           />
           <StatsCard

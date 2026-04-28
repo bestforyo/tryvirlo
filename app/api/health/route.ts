@@ -17,10 +17,14 @@ interface HealthStatus {
 }
 
 export async function GET(request: NextRequest) {
-  const checks = {
-    database: 'healthy' as const,
-    providers: 'healthy' as const,
-    storage: 'healthy' as const
+  const checks: {
+    database: 'healthy' | 'unhealthy';
+    providers: 'healthy' | 'degraded' | 'unhealthy';
+    storage: 'healthy' | 'unhealthy';
+  } = {
+    database: 'healthy',
+    providers: 'healthy',
+    storage: 'healthy'
   };
 
   // Check database connection

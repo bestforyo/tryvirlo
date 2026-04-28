@@ -31,10 +31,9 @@ export async function resetCredits(): Promise<CreditResetResult> {
     // Find users whose billing cycle starts today
     const users = await prisma.user.findMany({
       where: {
-        subscription: {
-          status: 'ACTIVE',
-          plan: {
-            not: 'FREE'
+        subscriptions: {
+          some: {
+            status: 'ACTIVE'
           }
         },
         // Simple billing cycle: use signup day as billing day
@@ -46,11 +45,12 @@ export async function resetCredits(): Promise<CreditResetResult> {
       select: {
         id: true,
         plan: true,
-        subscription: {
+        subscriptions: {
           select: {
             id: true,
             plan: true
-          }
+          },
+          take: 1
         }
       }
     });
@@ -59,7 +59,8 @@ export async function resetCredits(): Promise<CreditResetResult> {
 
     for (const user of users) {
       try {
-        const plan = user.subscription?.plan || user.plan;
+        const subscription = user.subscriptions?.[0];
+        const plan = subscription?.plan || user.plan;
         const creditsToGrant = getCreditsForPlan(plan);
 
         if (creditsToGrant > 0) {
@@ -76,7 +77,7 @@ export async function resetCredits(): Promise<CreditResetResult> {
               data: {
                 userId: user.id,
                 amount: creditsToGrant,
-                type: 'SUBSCRIPTION_RESET',
+                type: 'SUBSCRIPTION',
                 description: `Monthly credits reset - ${plan} plan`
               }
             })

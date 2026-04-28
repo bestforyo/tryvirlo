@@ -47,15 +47,25 @@ export default async function AssetsPage() {
     }
   ]
 
-  let assets = demoAssets
+  let assets: any[] = demoAssets
 
   if (isDatabaseConfigured()) {
     try {
-      assets = await prisma.asset.findMany({
+      const dbAssets = await prisma.asset.findMany({
         where: { userId: user.id },
         orderBy: { createdAt: 'desc' },
         take: 50
       })
+      // Transform database assets to match expected format
+      assets = dbAssets.map((a: any) => ({
+        id: a.id,
+        type: a.type,
+        originalFilename: a.metadata?.originalFilename || `Asset ${a.id.slice(0, 8)}`,
+        fileSize: Number(a.fileSize || 0),
+        previewUrl: a.metadata?.previewUrl || null,
+        storageUrl: a.metadata?.storageUrl || null,
+        createdAt: a.createdAt
+      }))
     } catch {
       // Fall back to demo data
     }

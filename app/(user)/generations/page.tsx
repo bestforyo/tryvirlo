@@ -56,7 +56,7 @@ export default async function GenerationsPage() {
     }
   ]
 
-  let generations = demoGenerations
+  let generations: any[] = demoGenerations
 
   if (isDatabaseConfigured()) {
     try {

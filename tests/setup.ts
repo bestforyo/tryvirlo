@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { vi } from 'vitest';
+import { vi, afterEach } from 'vitest';
 
 // Mock environment variables for testing
 process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/tryvirlo_test';
@@ -59,7 +59,7 @@ const mockPrisma = {
 };
 
 // Global test utilities
-global.prisma = mockPrisma as any;
+(globalThis as any).prisma = mockPrisma;
 
 // For integration tests that need real database, create real client
 let realPrisma: PrismaClient | null = null;

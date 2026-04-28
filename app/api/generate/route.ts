@@ -10,7 +10,7 @@ const generationSchema = z.object({
   modelId: z.string().min(1),
   prompt: z.string().min(10).max(1000),
   parameters: z.object({
-    duration: z.number().int().in([5, 10, 15]).optional(),
+    duration: z.number().int().refine(v => [5, 10, 15].includes(v), { message: 'Duration must be 5, 10, or 15' }).optional(),
     quality: z.enum(['720p', '1080p', '4K']).optional(),
     aspectRatio: z.enum(['16:9', '9:16', '1:1']).optional(),
     negativePrompt: z.string().max(500).optional(),
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
       generationId: generation.id,
       modelId,
       type,
-      parameters: {
+      params: {
         prompt,
         negativePrompt: parameters.negativePrompt,
         duration: parameters.duration,

@@ -5,7 +5,7 @@ import { GenerationHandler } from '@/lib/workers/generation-handler';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await getUser();
@@ -13,7 +13,7 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const generationId = params.id;
+    const { id: generationId } = await params;
 
     const generation = await prisma.generation.findUnique({
       where: { id: generationId }
@@ -84,7 +84,7 @@ export async function GET(
 // DELETE endpoint to cancel generation
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await getUser();
@@ -92,7 +92,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const generationId = params.id;
+    const { id: generationId } = await params;
 
     const generation = await prisma.generation.findUnique({
       where: { id: generationId }

@@ -39,11 +39,13 @@ export function GenerationProgress({
           onLoadedData={() => onComplete?.(resultUrl)}
         />
 
-        <Button asChild className="w-full">
-          <a href={resultUrl} download>
-            Download Video
-          </a>
-        </Button>
+        <a
+          href={resultUrl}
+          download
+          className="w-full flex items-center justify-center px-6 py-3 rounded-full bg-gradient-to-r from-[#FF4081] to-[#E91E63] text-white font-semibold hover:translate-y-[-2px] hover:shadow-glow transition-all"
+        >
+          Download Video
+        </a>
       </div>
     );
   }

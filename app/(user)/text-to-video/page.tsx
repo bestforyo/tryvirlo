@@ -110,7 +110,7 @@ export default function TextToVideoPage() {
     }
 
     // Timeout
-    setGeneration(prev => ({
+    setGeneration((prev: any) => ({
       ...prev,
       status: 'FAILED',
       error: 'Generation timeout. Please try again.'

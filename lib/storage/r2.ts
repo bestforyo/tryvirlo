@@ -121,7 +121,7 @@ class R2Storage {
           'Content-Type': contentType,
           'Authorization': this.getAuthHeader('PUT', key, contentType, buffer.length)
         },
-        body: buffer
+        body: new Uint8Array(buffer)
       });
 
       if (!response.ok) {

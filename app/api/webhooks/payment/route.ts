@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     // Log webhook
     await prisma.webhookLog.create({
       data: {
-        eventId: event.data.id,
+        provider: 'CREEMIO',
         eventType: event.event,
         payload: rawBody,
         processed: true
@@ -92,13 +92,17 @@ async function handleSubscriptionCreated(event: any) {
     return;
   }
 
-  const plan = creemPayment.mapPlan(plan_id);
-  const credits = creemPayment.getCreditsForPlan(plan);
+  const basePlan = creemPayment.mapPlan(plan_id);
+  const credits = creemPayment.getCreditsForPlan(basePlan);
+
+  // Map base plan to schema enum (determine monthly/yearly from plan_id)
+  const isYearly = plan_id?.includes('yearly');
+  const plan = `${basePlan}_${isYearly ? 'YEARLY' : 'MONTHLY'}` as any;
 
   await prisma.$transaction([
-    // Create or update subscription
+    // Create subscription (using providerSubscriptionId as unique key)
     prisma.subscription.upsert({
-      where: { userId: metadata.userId },
+      where: { providerSubscriptionId: id },
       create: {
         userId: metadata.userId,
         provider: 'CREEMIO',
@@ -110,7 +114,6 @@ async function handleSubscriptionCreated(event: any) {
         currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
       },
       update: {
-        providerSubscriptionId: id,
         providerCustomerId: customer_id,
         plan: plan,
         status: 'ACTIVE',
@@ -138,7 +141,7 @@ async function handleSubscriptionCreated(event: any) {
       data: {
         userId: metadata.userId,
         amount: credits,
-        type: 'SUBSCRIPTION_PURCHASE',
+        type: 'SUBSCRIPTION',
         referenceId: id,
         description: `Initial credits - ${plan} plan`
       }
@@ -161,7 +164,9 @@ async function handleSubscriptionUpdated(event: any) {
     return;
   }
 
-  const plan = creemPayment.mapPlan(plan_id);
+  const basePlan = creemPayment.mapPlan(plan_id);
+  const isYearly = plan_id?.includes('yearly');
+  const plan = `${basePlan}_${isYearly ? 'YEARLY' : 'MONTHLY'}` as any;
 
   await prisma.subscription.update({
     where: { id: subscription.id },
@@ -191,8 +196,8 @@ async function handleSubscriptionCancelled(event: any) {
     prisma.subscription.update({
       where: { id: subscription.id },
       data: {
-        status: 'CANCELLED',
-        cancelledAt: new Date()
+        status: 'CANCELED',
+        cancelAtPeriodEnd: true
       }
     }),
     prisma.user.update({

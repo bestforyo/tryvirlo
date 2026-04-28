@@ -116,8 +116,8 @@ async function main() {
   for (const model of models) {
     await prisma.model.upsert({
       where: { id: model.id },
-      update: model,
-      create: model
+      update: model as any,
+      create: model as any
     });
   }
 

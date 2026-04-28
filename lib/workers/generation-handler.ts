@@ -43,7 +43,7 @@ export class GenerationHandler {
       await prisma.generation.update({
         where: { id: generationId },
         data: {
-          providerJobId: jobId,
+          jobId: jobId,
           status: 'PROCESSING'
         }
       });
@@ -80,13 +80,10 @@ export class GenerationHandler {
           return;
         }
 
-        // Update progress
+        // Update progress - progress tracking is done via status polling
         if (status.status === 'PROCESSING') {
-          const progress = Math.min(45 + (attempt * 2), 90);
-          await prisma.generation.update({
-            where: { id: generationId },
-            data: { progress }
-          });
+          // Progress is calculated client-side based on status
+          // In production, you might want to add a progress field to the schema
         }
       } catch (error: any) {
         console.error(`Polling error for ${generationId}:`, error);
@@ -109,7 +106,6 @@ export class GenerationHandler {
       data: {
         status: 'COMPLETED',
         resultUrl,
-        progress: 100,
         completedAt: new Date()
       }
     });
@@ -165,7 +161,7 @@ export class GenerationHandler {
   static async cancel(generationId: string): Promise<boolean> {
     const generation = await prisma.generation.findUnique({
       where: { id: generationId },
-      select: { modelId: true, providerJobId: true, status: true }
+      select: { modelId: true, jobId: true, status: true }
     });
 
     if (!generation || generation.status !== 'PENDING') {
@@ -174,8 +170,8 @@ export class GenerationHandler {
 
     const provider = providerRouter.getProviderForModel(generation.modelId);
 
-    if (provider && generation.providerJobId) {
-      const cancelled = await provider.cancelJob(generation.providerJobId);
+    if (provider && generation.jobId) {
+      const cancelled = await provider.cancelJob(generation.jobId);
 
       if (cancelled) {
         await prisma.generation.update({
