@@ -1,0 +1,207 @@
+/**
+ * Generation Handler
+ * Orchestrates the video/image generation workflow
+ */
+
+import { prisma } from '@/lib/db';
+import { providerRouter } from '@/lib/providers/router';
+import { GenerationParams } from '@/lib/providers/base';
+
+interface GenerationJob {
+  generationId: string;
+  modelId: string;
+  type: string;
+  params: GenerationParams;
+}
+
+export class GenerationHandler {
+  /**
+   * Submit a new generation job
+   */
+  static async submit(job: GenerationJob): Promise<void> {
+    const { generationId, modelId, type, params } = job;
+
+    // Get provider for model
+    const provider = providerRouter.getProviderForModel(modelId);
+
+    if (!provider) {
+      await this.failGeneration(
+        generationId,
+        'No provider available for this model'
+      );
+      return;
+    }
+
+    try {
+      // Validate parameters
+      provider.validateParams(modelId, type, params);
+
+      // Submit to provider
+      const jobId = await provider.submitGeneration(modelId, type, params);
+
+      // Update generation record with job ID
+      await prisma.generation.update({
+        where: { id: generationId },
+        data: {
+          providerJobId: jobId,
+          status: 'PROCESSING'
+        }
+      });
+
+      // Start polling for completion (in production, use background job)
+      this.pollStatus(generationId, provider, jobId);
+    } catch (error: any) {
+      await this.failGeneration(generationId, error.message);
+    }
+  }
+
+  /**
+   * Poll for generation status
+   */
+  private static async pollStatus(
+    generationId: string,
+    provider: any,
+    jobId: string,
+    maxAttempts: number = 30
+  ): Promise<void> {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      try {
+        const status = await provider.checkStatus(jobId);
+
+        if (status.status === 'COMPLETED' && status.result) {
+          await this.completeGeneration(generationId, status.result);
+          return;
+        }
+
+        if (status.status === 'FAILED') {
+          await this.failGeneration(generationId, status.error || 'Generation failed');
+          return;
+        }
+
+        // Update progress
+        if (status.status === 'PROCESSING') {
+          const progress = Math.min(45 + (attempt * 2), 90);
+          await prisma.generation.update({
+            where: { id: generationId },
+            data: { progress }
+          });
+        }
+      } catch (error: any) {
+        console.error(`Polling error for ${generationId}:`, error);
+      }
+    }
+
+    // Timeout
+    await this.failGeneration(generationId, 'Generation timeout');
+  }
+
+  /**
+   * Mark generation as completed
+   */
+  private static async completeGeneration(
+    generationId: string,
+    resultUrl: string
+  ): Promise<void> {
+    await prisma.generation.update({
+      where: { id: generationId },
+      data: {
+        status: 'COMPLETED',
+        resultUrl,
+        progress: 100,
+        completedAt: new Date()
+      }
+    });
+  }
+
+  /**
+   * Mark generation as failed and refund credits
+   */
+  private static async failGeneration(
+    generationId: string,
+    errorMessage: string
+  ): Promise<void> {
+    const generation = await prisma.generation.findUnique({
+      where: { id: generationId },
+      select: { userId: true, creditsConsumed: true }
+    });
+
+    if (!generation) return;
+
+    await prisma.$transaction([
+      // Update generation status
+      prisma.generation.update({
+        where: { id: generationId },
+        data: {
+          status: 'FAILED',
+          errorMessage,
+          completedAt: new Date()
+        }
+      }),
+      // Refund credits
+      prisma.user.update({
+        where: { id: generation.userId },
+        data: {
+          creditsBalance: { increment: generation.creditsConsumed || 0 }
+        }
+      }),
+      // Log refund transaction
+      prisma.creditsTransaction.create({
+        data: {
+          userId: generation.userId,
+          amount: generation.creditsConsumed || 0,
+          type: 'REFUND_GENERATION',
+          referenceId: generationId,
+          description: `Failed generation refund: ${errorMessage}`
+        }
+      })
+    ]);
+  }
+
+  /**
+   * Cancel a pending generation
+   */
+  static async cancel(generationId: string): Promise<boolean> {
+    const generation = await prisma.generation.findUnique({
+      where: { id: generationId },
+      select: { modelId: true, providerJobId: true, status: true }
+    });
+
+    if (!generation || generation.status !== 'PENDING') {
+      return false;
+    }
+
+    const provider = providerRouter.getProviderForModel(generation.modelId);
+
+    if (provider && generation.providerJobId) {
+      const cancelled = await provider.cancelJob(generation.providerJobId);
+
+      if (cancelled) {
+        await prisma.generation.update({
+          where: { id: generationId },
+          data: { status: 'CANCELLED' }
+        });
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Get estimated generation time
+   */
+  static getEstimatedTime(
+    modelId: string,
+    params: GenerationParams
+  ): number {
+    const provider = providerRouter.getProviderForModel(modelId);
+
+    if (!provider) {
+      return 45; // Default estimate
+    }
+
+    return provider.estimateTime(params);
+  }
+}
