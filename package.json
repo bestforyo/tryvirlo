@@ -4,19 +4,22 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate --schema=lib/db/schema.prisma && next build",
     "start": "next start",
     "lint": "next lint",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push --schema=lib/db/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema=lib/db/schema.prisma",
     "db:seed": "tsx lib/db/seed.ts",
-    "db:studio": "prisma studio",
+    "db:studio": "prisma studio --schema=lib/db/schema.prisma",
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug"
+  },
+  "prisma": {
+    "schema": "lib/db/schema.prisma"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
