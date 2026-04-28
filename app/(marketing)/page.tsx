@@ -1,4 +1,21 @@
 import Link from "next/link";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "tryvirlo - All AI Models, One Subscription",
+  description: "Generate videos and images with the best AI models. Access 10+ AI models through a single credit-based subscription.",
+  keywords: ["AI video", "AI image", "Sora", "Midjourney", "DALL-E", "text to video", "AI aggregation"],
+  verification: {
+    google: "dCRdD7v5stGqsygdtVHrSv7nisOy87FztikxGdmPamI",
+  },
+  openGraph: {
+    title: "tryvirlo - All AI Models, One Subscription",
+    description: "Generate videos and images with the best AI models",
+    url: "https://tryvirlo.com",
+    siteName: "tryvirlo",
+    type: "website",
+  },
+};
 
 export default function HomePage() {
   return (
