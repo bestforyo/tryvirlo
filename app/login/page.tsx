@@ -1,15 +1,6 @@
-import { redirect } from 'next/navigation';
-
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ redirect?: string }>
-}) {
-  const { redirect } = await searchParams
-  const redirectTo = redirect || '/dashboard'
-
+export default function LoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center px-6">
+    <div className="min-h-screen flex items-center justify-center px-6 bg-[#0D0D0D]">
       <div className="max-w-md w-full space-y-8">
         {/* Logo */}
         <div className="text-center">
@@ -27,8 +18,8 @@ export default async function LoginPage({
         </div>
 
         {/* Sign In Button */}
-        <div className="glass rounded-2xl p-8 space-y-6">
-          <form action={`/api/auth/signin?redirect=${encodeURIComponent(redirectTo)}`} method="POST">
+        <div className="rounded-2xl p-8 space-y-6 bg-white/5 border border-white/10">
+          <form action="/api/auth/signin" method="POST">
             <button
               type="submit"
               className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-full border border-white/20 text-white font-medium hover:bg-white/5 transition-all"
