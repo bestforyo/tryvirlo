@@ -54,7 +54,7 @@ class ProviderRouter {
       ]);
     }
 
-    // Pic2API - Image to Video
+    // Pic2API - Image to Video & Text to Video
     if (process.env.PIC2API_API_KEY) {
       const pic2api = new Pic2APIProvider({
         apiKey: process.env.PIC2API_API_KEY,

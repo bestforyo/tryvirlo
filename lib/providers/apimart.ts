@@ -6,21 +6,26 @@
 import { BaseProvider, GenerationParams, ProviderConfig } from './base';
 
 interface ApimartJobResponse {
-  success: boolean;
   id?: string;
-  status?: string;
-  output?: string;
-  error?: string;
+  object?: string;
+  created?: number;
+  model?: string;
+  data?: Array<{
+    url?: string;
+    b64_json?: string;
+  }>;
+  error?: {
+    message: string;
+    type: string;
+  };
 }
 
 interface ApimartSubmitRequest {
   model: string;
   prompt: string;
-  negative_prompt?: string;
-  width?: number;
-  height?: number;
-  steps?: number;
-  seed?: number;
+  n?: number;
+  size?: string;
+  response_format?: string;
 }
 
 export class ApimartProvider extends BaseProvider {
@@ -29,20 +34,20 @@ export class ApimartProvider extends BaseProvider {
   }
 
   /**
-   * Get dimensions for image generation
+   * Get size string for OpenAI format
    */
-  private getDimensions(aspectRatio: string, quality: string): { width: number; height: number } {
+  private getSize(aspectRatio: string, quality: string): string {
     const baseSize = quality === '4K' ? 1024 : quality === '1080p' ? 768 : 512;
 
     switch (aspectRatio) {
       case '16:9':
-        return { width: Math.round(baseSize * 16 / 9), height: baseSize };
+        return `${Math.round(baseSize * 16 / 9)}x${baseSize}`;
       case '9:16':
-        return { width: Math.round(baseSize * 9 / 16), height: baseSize };
+        return `${Math.round(baseSize * 9 / 16)}x${baseSize}`;
       case '1:1':
-        return { width: baseSize, height: baseSize };
+        return `${baseSize}x${baseSize}`;
       default:
-        return { width: 768, height: 512 };
+        return '768x512';
     }
   }
 
@@ -51,10 +56,10 @@ export class ApimartProvider extends BaseProvider {
    */
   private mapModel(model: string): string {
     const modelMap: Record<string, string> = {
-      'flux-pro': 'flux-pro-v1.1',
-      'flux-schnell': 'flux-schnell',
-      'midjourney': 'midjourney-v6',
-      'stable-diffusion': 'sd-3'
+      'flux-pro': 'gemini-3.0-pro-image',
+      'flux-schnell': 'gemini-3.1-flash-image',
+      'midjourney': 'nano-banana-pro',
+      'stable-diffusion': 'nano-banana-std'
     };
     return modelMap[model] || model;
   }
@@ -88,24 +93,17 @@ export class ApimartProvider extends BaseProvider {
   ): Promise<string> {
     this.validateParams(model, type, params);
 
-    const { width, height } = this.getDimensions(
-      params.aspectRatio || '16:9',
-      params.quality || '1080p'
-    );
-
     const payload: ApimartSubmitRequest = {
       model: this.mapModel(model),
       prompt: params.prompt.trim(),
-      negative_prompt: params.negativePrompt,
-      width,
-      height,
-      steps: 30,
-      seed: params.seed
+      n: 1,
+      size: this.getSize(params.aspectRatio || '16:9', params.quality || '1080p'),
+      response_format: 'url'
     };
 
     try {
       const response = await this.fetchWithRetry(
-        `${this.config.baseUrl}/v1/generations`,
+        `${this.config.baseUrl}/v1/images/generations`,
         {
           method: 'POST',
           headers: {
@@ -118,8 +116,12 @@ export class ApimartProvider extends BaseProvider {
 
       const data: ApimartJobResponse = await response.json();
 
-      if (!data.success || !data.id) {
-        throw new Error(data.error || 'Failed to submit generation');
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to submit generation');
+      }
+
+      if (!data.id) {
+        throw new Error('No task ID returned from Apimart');
       }
 
       return data.id;
@@ -138,7 +140,7 @@ export class ApimartProvider extends BaseProvider {
   }> {
     try {
       const response = await this.fetchWithRetry(
-        `${this.config.baseUrl}/v1/generations/${jobId}`,
+        `${this.config.baseUrl}/v1/images/generations/${jobId}`,
         {
           method: 'GET',
           headers: {
@@ -149,18 +151,24 @@ export class ApimartProvider extends BaseProvider {
 
       const data: ApimartJobResponse = await response.json();
 
-      const statusMap: Record<string, 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'> = {
-        'pending': 'PENDING',
-        'processing': 'PROCESSING',
-        'completed': 'COMPLETED',
-        'failed': 'FAILED',
-        'cancelled': 'FAILED'
-      };
+      if (data.error) {
+        return {
+          status: 'FAILED',
+          error: data.error.message
+        };
+      }
 
+      // Apimart returns data array with URLs when completed
+      if (data.data && data.data.length > 0 && data.data[0].url) {
+        return {
+          status: 'COMPLETED',
+          result: data.data[0].url
+        };
+      }
+
+      // If no data yet, assume it's still processing
       return {
-        status: statusMap[data.status || 'pending'] || 'PENDING',
-        result: data.output,
-        error: data.error
+        status: 'PROCESSING'
       };
     } catch (error: any) {
       return {
@@ -174,22 +182,8 @@ export class ApimartProvider extends BaseProvider {
    * Cancel a pending job
    */
   async cancelJob(jobId: string): Promise<boolean> {
-    try {
-      const response = await this.fetchWithRetry(
-        `${this.config.baseUrl}/v1/generations/${jobId}/cancel`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.config.apiKey}`
-          }
-        }
-      );
-
-      const data: ApimartJobResponse = await response.json();
-      return data.success;
-    } catch {
-      return false;
-    }
+    // Apimart may not support cancellation, return false
+    return false;
   }
 
   /**

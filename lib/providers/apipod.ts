@@ -6,35 +6,25 @@
 import { BaseProvider, GenerationParams, ProviderConfig } from './base';
 
 interface ApipodJobResponse {
-  success: boolean;
-  task_id?: string;
+  id?: string;
   status?: string;
-  result_url?: string;
-  error?: string;
+  output?: {
+    url?: string;
+  };
+  error?: {
+    message: string;
+  };
 }
 
 interface ApipodSubmitRequest {
   model: string;
   video_url: string;
-  scale_factor?: number;
-  target_quality?: string;
+  scale?: string;
 }
 
 export class ApipodProvider extends BaseProvider {
   constructor(config: ProviderConfig) {
     super('Apipod', config);
-  }
-
-  /**
-   * Map quality to scale factor
-   */
-  private getScaleFactor(quality: string): number {
-    const scaleMap: Record<string, number> = {
-      '4K': 4,
-      '1080p': 2,
-      '720p': 1.5
-    };
-    return scaleMap[quality] || 2;
   }
 
   /**
@@ -47,6 +37,18 @@ export class ApipodProvider extends BaseProvider {
       'videoupscale-anim': 'anime-upscale-v2'
     };
     return modelMap[model] || model;
+  }
+
+  /**
+   * Get scale string for API
+   */
+  private getScale(quality: string): string {
+    const scaleMap: Record<string, string> = {
+      '4K': '4x',
+      '1080p': '2x',
+      '720p': '1.5x'
+    };
+    return scaleMap[quality] || '2x';
   }
 
   /**
@@ -85,18 +87,17 @@ export class ApipodProvider extends BaseProvider {
     const payload: ApipodSubmitRequest = {
       model: this.mapModel(model),
       video_url: videoUrl,
-      scale_factor: this.getScaleFactor(params.quality || '1080p'),
-      target_quality: params.quality || '1080p'
+      scale: this.getScale(params.quality || '1080p')
     };
 
     try {
       const response = await this.fetchWithRetry(
-        `${this.config.baseUrl}/v1/upscale`,
+        `${this.config.baseUrl}/v1/video/upscale`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Key ${this.config.apiKey}`
+            'Authorization': `Bearer ${this.config.apiKey}`
           },
           body: JSON.stringify(payload)
         }
@@ -104,11 +105,15 @@ export class ApipodProvider extends BaseProvider {
 
       const data: ApipodJobResponse = await response.json();
 
-      if (!data.success || !data.task_id) {
-        throw new Error(data.error || 'Failed to submit upscaling job');
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to submit upscaling job');
       }
 
-      return data.task_id;
+      if (!data.id) {
+        throw new Error('No task ID returned from Apipod');
+      }
+
+      return data.id;
     } catch (error: any) {
       throw new Error(`Apipod submission failed: ${error.message}`);
     }
@@ -124,28 +129,39 @@ export class ApipodProvider extends BaseProvider {
   }> {
     try {
       const response = await this.fetchWithRetry(
-        `${this.config.baseUrl}/v1/upscale/status/${jobId}`,
+        `${this.config.baseUrl}/v1/video/upscale/${jobId}`,
         {
           method: 'GET',
           headers: {
-            'Authorization': `Key ${this.config.apiKey}`
+            'Authorization': `Bearer ${this.config.apiKey}`
           }
         }
       );
 
       const data: ApipodJobResponse = await response.json();
 
+      if (data.error) {
+        const errorMessage = typeof data.error === 'string'
+          ? data.error
+          : (data.error as any)?.message || JSON.stringify(data.error);
+
+        return {
+          status: 'FAILED',
+          error: errorMessage
+        };
+      }
+
       const statusMap: Record<string, 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'> = {
-        'queued': 'PENDING',
+        'pending': 'PENDING',
         'processing': 'PROCESSING',
         'completed': 'COMPLETED',
         'failed': 'FAILED'
       };
 
       return {
-        status: statusMap[data.status || 'queued'] || 'PENDING',
-        result: data.result_url,
-        error: data.error
+        status: statusMap[data.status || 'pending'] || 'PENDING',
+        result: data.output?.url,
+        error: undefined
       };
     } catch (error: any) {
       return {
@@ -159,22 +175,8 @@ export class ApipodProvider extends BaseProvider {
    * Cancel a pending job
    */
   async cancelJob(jobId: string): Promise<boolean> {
-    try {
-      const response = await this.fetchWithRetry(
-        `${this.config.baseUrl}/v1/upscale/cancel/${jobId}`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Key ${this.config.apiKey}`
-          }
-        }
-      );
-
-      const data: ApipodJobResponse = await response.json();
-      return data.success;
-    } catch {
-      return false;
-    }
+    // Apipod may not support cancellation, return false
+    return false;
   }
 
   /**

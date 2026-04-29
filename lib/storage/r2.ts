@@ -4,11 +4,21 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+  HeadObjectCommand,
+  GetObjectCommand
+} from '@aws-sdk/client-s3';
+import { getSignedUrl as getAwsSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export interface UploadResult {
   success: boolean;
   key: string;
   url?: string;
+  size?: number;
   error?: string;
 }
 
@@ -23,13 +33,29 @@ class R2Storage {
   private accessKeyId: string;
   private secretAccessKey: string;
   private publicUrl: string;
+  private endpoint: string;
+  private client: S3Client;
 
   constructor() {
     this.accountId = process.env.R2_ACCOUNT_ID || '';
     this.bucketName = process.env.R2_BUCKET_NAME || 'tryvirlo-assets';
     this.accessKeyId = process.env.R2_ACCESS_KEY_ID || '';
     this.secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || '';
-    this.publicUrl = process.env.R2_PUBLIC_URL || `https://r2.pub.dev/${this.bucketName}`;
+
+    const configuredEndpoint = process.env.R2_ENDPOINT || `https://${this.accountId}.r2.cloudflarestorage.com`;
+    const parsed = new URL(configuredEndpoint);
+    this.endpoint = `${parsed.protocol}//${parsed.host}`;
+    this.publicUrl = process.env.R2_PUBLIC_URL || `${this.endpoint}/${this.bucketName}`;
+
+    this.client = new S3Client({
+      region: 'auto',
+      endpoint: this.endpoint,
+      credentials: {
+        accessKeyId: this.accessKeyId,
+        secretAccessKey: this.secretAccessKey
+      },
+      forcePathStyle: false
+    });
   }
 
   /**
@@ -68,31 +94,28 @@ class R2Storage {
     this.validateConfig();
 
     try {
-      // Download the file
       const response = await fetch(fileUrl);
       if (!response.ok) {
         throw new Error(`Failed to download file: ${response.statusText}`);
       }
 
-      const buffer = await response.arrayBuffer();
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
       const contentType = response.headers.get('content-type') || 'video/mp4';
-
-      // Determine extension
       const extension = this.getExtension(contentType, fileUrl);
       const key = this.generateKey(userId, type, extension);
 
-      // Upload to R2
-      const uploadResult = await this.uploadBuffer(key, Buffer.from(buffer), contentType);
-
-      if (uploadResult.success) {
-        return {
-          success: true,
-          key,
-          url: `${this.publicUrl}/${key}`
-        };
+      const uploadResult = await this.uploadBuffer(key, buffer, contentType);
+      if (!uploadResult.success) {
+        return uploadResult;
       }
 
-      return uploadResult;
+      return {
+        success: true,
+        key,
+        url: uploadResult.url,
+        size: buffer.length
+      };
     } catch (error: any) {
       return {
         success: false,
@@ -113,25 +136,20 @@ class R2Storage {
     this.validateConfig();
 
     try {
-      const url = `https://${this.accountId}.r2.cloudflarestorage.com/${this.bucketName}/${key}`;
-
-      const response = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': contentType,
-          'Authorization': this.getAuthHeader('PUT', key, contentType, buffer.length)
-        },
-        body: new Uint8Array(buffer)
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType
       });
 
-      if (!response.ok) {
-        throw new Error(`R2 upload failed: ${response.statusText}`);
-      }
+      await this.client.send(command);
 
       return {
         success: true,
         key,
-        url: `${this.publicUrl}/${key}`
+        url: `${this.publicUrl}/${key}`,
+        size: buffer.length
       };
     } catch (error: any) {
       return {
@@ -151,10 +169,19 @@ class R2Storage {
   ): Promise<SignedUrlResult> {
     this.validateConfig();
 
-    const expiresAt = new Date(Date.now() + expiresIn * 1000);
-    const url = `${this.publicUrl}/${key}?expires=${expiresAt.getTime()}`;
+    const command = new GetObjectCommand({
+      Bucket: this.bucketName,
+      Key: key
+    });
 
-    return { url, expiresAt };
+    const url = await getAwsSignedUrl(this.client, command, {
+      expiresIn
+    });
+
+    return {
+      url,
+      expiresAt: new Date(Date.now() + expiresIn * 1000)
+    };
   }
 
   /**
@@ -164,16 +191,13 @@ class R2Storage {
     this.validateConfig();
 
     try {
-      const url = `https://${this.accountId}.r2.cloudflarestorage.com/${this.bucketName}/${key}`;
-
-      const response = await fetch(url, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': this.getAuthHeader('DELETE', key, '', 0)
-        }
+      const command = new DeleteObjectCommand({
+        Bucket: this.bucketName,
+        Key: key
       });
 
-      return response.ok;
+      const response = await this.client.send(command);
+      return response.$metadata.httpStatusCode === 204 || response.$metadata.httpStatusCode === 200;
     } catch {
       return false;
     }
@@ -210,20 +234,14 @@ class R2Storage {
     this.validateConfig();
 
     try {
-      const url = `https://${this.accountId}.r2.cloudflarestorage.com/${this.bucketName}?prefix=${userId}/&limit=${limit}`;
-
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': this.getAuthHeader('GET', `${userId}/`, '', 0)
-        }
+      const command = new ListObjectsV2Command({
+        Bucket: this.bucketName,
+        Prefix: `${userId}/`,
+        MaxKeys: limit
       });
 
-      if (!response.ok) {
-        return [];
-      }
-
-      const data = await response.json();
-      return data.contents?.map((item: any) => item.key) || [];
+      const response = await this.client.send(command);
+      return response.Contents?.map((item) => item.Key as string).filter(Boolean) || [];
     } catch {
       return [];
     }
@@ -249,6 +267,7 @@ class R2Storage {
     const typeMap: Record<string, string> = {
       'video/mp4': 'mp4',
       'video/webm': 'webm',
+      'video/quicktime': 'mov',
       'video/mov': 'mov',
       'image/jpeg': 'jpg',
       'image/png': 'png',
@@ -259,37 +278,8 @@ class R2Storage {
       return typeMap[contentType];
     }
 
-    // Extract from URL
     const match = url.match(/\.([^.]+)$/);
     return match ? match[1] : 'mp4';
-  }
-
-  /**
-   * Generate AWS-style authorization header
-   */
-  private getAuthHeader(
-    method: string,
-    key: string,
-    contentType: string,
-    contentLength: number
-  ): string {
-    // Simplified auth - in production use AWS SDK or proper signing
-    const date = new Date().toUTCString();
-    const stringToSign = `${method}\n\n${contentType}\n${date}\n/${this.bucketName}/${key}`;
-
-    // This is a placeholder - implement proper HMAC-SHA256 signing
-    // For production, use @aws-sdk/client-s3 or similar
-    return `AWS4-HMAC-SHA256 Credential=${this.accessKeyId}/${this.dateString()}/${this.accountId}/r2/aws4_request, SignedHeaders=host;x-amz-date, Signature=${this.computeSignature(stringToSign)}`;
-  }
-
-  private dateString(): string {
-    const date = new Date();
-    return `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}`;
-  }
-
-  private computeSignature(stringToSign: string): string {
-    // Placeholder - implement proper HMAC-SHA256
-    return Buffer.from(stringToSign).toString('base64').substring(0, 32);
   }
 }
 

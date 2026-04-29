@@ -6,6 +6,7 @@
 import { prisma } from '@/lib/db';
 import { providerRouter } from '@/lib/providers/router';
 import { GenerationParams } from '@/lib/providers/base';
+import { r2Storage } from '@/lib/storage/r2';
 
 interface GenerationJob {
   generationId: string;
@@ -101,14 +102,62 @@ export class GenerationHandler {
     generationId: string,
     resultUrl: string
   ): Promise<void> {
-    await prisma.generation.update({
+    const generation = await prisma.generation.findUnique({
       where: { id: generationId },
-      data: {
-        status: 'COMPLETED',
-        resultUrl,
-        completedAt: new Date()
-      }
+      select: { userId: true, type: true }
     });
+
+    if (!generation) {
+      return;
+    }
+
+    const assetType = ['TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'VIDEO_UPSCALE'].includes(generation.type)
+      ? 'video'
+      : 'image';
+
+    const uploadResult = await r2Storage.uploadFromUrl(
+      generation.userId,
+      resultUrl,
+      assetType === 'video' ? 'video' : 'image'
+    );
+
+    if (!uploadResult.success || !uploadResult.url) {
+      await this.failGeneration(
+        generationId,
+        `Failed to store generated asset in R2: ${uploadResult.error || 'Unknown error'}`
+      );
+      return;
+    }
+
+    const fileSize = uploadResult.size ? BigInt(uploadResult.size) : undefined;
+
+    await prisma.$transaction([
+      prisma.generation.update({
+        where: { id: generationId },
+        data: {
+          status: 'COMPLETED',
+          resultUrl: uploadResult.url,
+          resultStorageKey: uploadResult.key,
+          fileSize,
+          completedAt: new Date()
+        }
+      }),
+      prisma.asset.create({
+        data: {
+          userId: generation.userId,
+          generationId,
+          type: assetType === 'video' ? 'VIDEO' : 'IMAGE',
+          storageKey: uploadResult.key,
+          storageProvider: 'r2',
+          fileSize,
+          metadata: {
+            sourceUrl: resultUrl,
+            storageUrl: uploadResult.url,
+            assetType
+          }
+        }
+      })
+    ]);
   }
 
   /**

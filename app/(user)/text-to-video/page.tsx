@@ -21,6 +21,8 @@ const MODELS: Model[] = [
   { id: 'pollo-3.0', name: 'Pollo 3.0', quality: '1080p', speedTier: 'fast', credits: 40 },
   { id: 'seedance-2.0', name: 'Seedance 2.0', quality: '1080p', speedTier: 'very_fast', credits: 35 },
   { id: 'veo-3.1', name: 'Veo 3.1', quality: '4K', speedTier: 'medium', credits: 45 },
+  { id: 'kling-2.5', name: 'Kling 2.5', quality: '1080p', speedTier: 'medium', credits: 42 },
+  { id: 'runway-gen3', name: 'Runway Gen3', quality: '4K', speedTier: 'slow', credits: 55 },
 ];
 
 export default function TextToVideoPage() {
@@ -157,7 +159,7 @@ export default function TextToVideoPage() {
               quality={quality}
               aspectRatio={aspectRatio}
               onDurationChange={setDuration}
-              onQualityChange={() => {}}
+              onQualityChange={() => { }}
               onAspectRatioChange={setAspectRatio}
             />
 
@@ -174,7 +176,7 @@ export default function TextToVideoPage() {
           {generation && (
             <GenerationProgress
               generation={generation}
-              onComplete={() => {}}
+              onComplete={() => { }}
               onRetry={handleRetry}
             />
           )}

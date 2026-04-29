@@ -7,6 +7,7 @@ interface PromptInputProps {
   value: string;
   onChange: (value: string) => void;
   maxLength?: number;
+  minLength?: number;
   placeholder?: string;
   disabled?: boolean;
 }
@@ -15,6 +16,7 @@ export function PromptInput({
   value,
   onChange,
   maxLength = 1000,
+  minLength,
   placeholder = "Describe what you want to create...",
   disabled = false
 }: PromptInputProps) {
@@ -26,6 +28,7 @@ export function PromptInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         maxLength={maxLength}
+        minLength={minLength}
         disabled={disabled}
         rows={5}
         className="resize-none"

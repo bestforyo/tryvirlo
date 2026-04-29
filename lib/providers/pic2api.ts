@@ -6,19 +6,27 @@
 import { BaseProvider, GenerationParams, ProviderConfig } from './base';
 
 interface Pic2APIJobResponse {
-  success: boolean;
-  task_id?: string;
-  status?: string;
-  output_url?: string;
-  error?: string;
+  id?: string;
+  object?: string;
+  created?: number;
+  model?: string;
+  data?: Array<{
+    url?: string;
+    b64_json?: string;
+  }>;
+  error?: {
+    message: string;
+    type: string;
+  };
 }
 
 interface Pic2APISubmitRequest {
   model: string;
-  image_url: string;
   prompt?: string;
+  image_url?: string;
   duration?: number;
-  motion_scale?: number;
+  aspect_ratio?: string;
+  resolution?: string;
 }
 
 export class Pic2APIProvider extends BaseProvider {
@@ -31,11 +39,27 @@ export class Pic2APIProvider extends BaseProvider {
    */
   private mapModel(model: string): string {
     const modelMap: Record<string, string> = {
-      'animate-diff': 'animate-diff-v3',
-      'motion-v1': 'motion-v1',
-      'live-portrait': 'live-portrait'
+      'animate-diff': 'sora-2-pro',
+      'motion-v1': 'veo-3',
+      'live-portrait': 'kling-2.5'
     };
     return modelMap[model] || model;
+  }
+
+  /**
+   * Get task type based on generation type
+   */
+  private getTaskType(type: string): string {
+    switch (type) {
+      case 'TEXT_TO_VIDEO':
+        return 'txt2video';
+      case 'IMAGE_TO_VIDEO':
+        return 'img2video';
+      case 'TEXT_TO_IMAGE':
+        return 'txt2img';
+      default:
+        return 'img2video';
+    }
   }
 
   /**
@@ -68,24 +92,26 @@ export class Pic2APIProvider extends BaseProvider {
   ): Promise<string> {
     this.validateParams(model, type, params);
 
-    // For image-to-video, expect imageUrl in params
-    const imageUrl = (params as any).imageUrl;
-
-    if (!imageUrl) {
-      throw new Error('Image URL is required for image-to-video generation');
-    }
-
     const payload: Pic2APISubmitRequest = {
       model: this.mapModel(model),
-      image_url: imageUrl,
       prompt: params.prompt || undefined,
-      duration: params.duration || 4,
-      motion_scale: 5
+      duration: params.duration || 5,
+      aspect_ratio: params.aspectRatio || '16:9',
+      resolution: params.quality === '4K' ? '2160p' : params.quality === '1080p' ? '1080p' : '720p'
     };
+
+    // For image-to-video, add image_url
+    if (type === 'IMAGE_TO_VIDEO') {
+      const imageUrl = (params as any).imageUrl;
+      if (!imageUrl) {
+        throw new Error('Image URL is required for image-to-video generation');
+      }
+      payload.image_url = imageUrl;
+    }
 
     try {
       const response = await this.fetchWithRetry(
-        `${this.config.baseUrl}/api/v1/animate`,
+        `${this.config.baseUrl}/v1/video/generations`,
         {
           method: 'POST',
           headers: {
@@ -98,11 +124,15 @@ export class Pic2APIProvider extends BaseProvider {
 
       const data: Pic2APIJobResponse = await response.json();
 
-      if (!data.success || !data.task_id) {
-        throw new Error(data.error || 'Failed to submit animation');
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to submit generation');
       }
 
-      return data.task_id;
+      if (!data.id) {
+        throw new Error('No task ID returned from Pic2API');
+      }
+
+      return data.id;
     } catch (error: any) {
       throw new Error(`Pic2API submission failed: ${error.message}`);
     }
@@ -118,7 +148,7 @@ export class Pic2APIProvider extends BaseProvider {
   }> {
     try {
       const response = await this.fetchWithRetry(
-        `${this.config.baseUrl}/api/v1/task/${jobId}`,
+        `${this.config.baseUrl}/v1/video/generations/${jobId}`,
         {
           method: 'GET',
           headers: {
@@ -129,17 +159,24 @@ export class Pic2APIProvider extends BaseProvider {
 
       const data: Pic2APIJobResponse = await response.json();
 
-      const statusMap: Record<string, 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'> = {
-        'pending': 'PENDING',
-        'processing': 'PROCESSING',
-        'succeeded': 'COMPLETED',
-        'failed': 'FAILED'
-      };
+      if (data.error) {
+        return {
+          status: 'FAILED',
+          error: data.error.message
+        };
+      }
 
+      // Pic2API returns data array with URLs when completed
+      if (data.data && data.data.length > 0 && data.data[0].url) {
+        return {
+          status: 'COMPLETED',
+          result: data.data[0].url
+        };
+      }
+
+      // If no data yet, assume it's still processing
       return {
-        status: statusMap[data.status || 'pending'] || 'PENDING',
-        result: data.output_url,
-        error: data.error
+        status: 'PROCESSING'
       };
     } catch (error: any) {
       return {
@@ -153,22 +190,8 @@ export class Pic2APIProvider extends BaseProvider {
    * Cancel a pending job
    */
   async cancelJob(jobId: string): Promise<boolean> {
-    try {
-      const response = await this.fetchWithRetry(
-        `${this.config.baseUrl}/api/v1/task/${jobId}/cancel`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.config.apiKey}`
-          }
-        }
-      );
-
-      const data: Pic2APIJobResponse = await response.json();
-      return data.success;
-    } catch {
-      return false;
-    }
+    // Pic2API may not support cancellation, return false
+    return false;
   }
 
   /**
