@@ -1,7 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
-import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
 
 export async function GET(request: NextRequest) {
@@ -39,7 +38,7 @@ export async function GET(request: NextRequest) {
 
       if (error) {
         console.error('Auth error:', error)
-        redirect(`/login?error=${encodeURIComponent('authentication_failed')}`)
+        return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent('authentication_failed')}`, request.url))
       }
 
       if (data?.user && data.session) {
@@ -101,14 +100,14 @@ export async function GET(request: NextRequest) {
         }
 
         // Redirect to the intended page
-        redirect(redirectTo)
+        return NextResponse.redirect(new URL(redirectTo, request.url))
       }
     } catch (error) {
       console.error('Callback error:', error)
-      redirect(`/login?error=${encodeURIComponent('server_error')}`)
+      return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent('server_error')}`, request.url))
     }
   }
 
   // If no code, redirect to login
-  redirect('/login')
+  return NextResponse.redirect(new URL('/login', request.url))
 }
